@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard — TicketFlow</title>
+    <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+
+    <!-- ── Top Navigation ── -->
+    <nav class="topnav">
+        <div class="nav-brand">
+            <div class="nav-brand-icon">🎟️</div>
+            <span class="nav-brand-name">TicketFlow</span>
+        </div>
+        <div class="nav-right">
+            <div id="adminNavWrap" class="hidden">
+                <a href="/admin.html" class="admin-nav-link"><span>🛡️</span> Admin Panel</a>
+            </div>
+            <div class="user-badge">
+                <div class="user-avatar" id="userAvatar">?</div>
+                <span class="user-name" id="userName">...</span>
+            </div>
+            <button class="logout-btn" onclick="logout()">
+                <span>⏻</span> Logout
+            </button>
+        </div>
+    </nav>
+
+    <!-- ── Main Content ── -->
+    <main class="main-content">
+
+        <!-- Tab Navigation -->
+        <div class="tab-strip" role="tablist">
+            <button id="tabBook" class="tab-btn active" onclick="switchTab('book')" role="tab">
+                <span class="tab-icon">➕</span> Book Ticket
+            </button>
+            <button id="tabTickets" class="tab-btn" onclick="switchTab('tickets')" role="tab">
+                <span class="tab-icon">🎫</span> My Tickets
+            </button>
+            <button id="tabAgent" class="tab-btn hidden" onclick="switchTab('agent')" role="tab">
+                <span class="tab-icon">🛠️</span> Support Agent Workspace
+            </button>
+            <button id="tabHistory" class="tab-btn" onclick="switchTab('history')" role="tab">
+                <span class="tab-icon">📜</span> History
+            </button>
+        </div>
+
+        <!-- 1. BOOKING FORM SECTION -->
+        <div id="sectionBook" class="section">
+            <div class="panel">
+                <p class="panel-title">Book a new support ticket</p>
+                <p class="panel-desc">Describe your issue and our team will get back to you shortly.</p>
+
+                <form id="bookForm" novalidate>
+                    <div class="form-group">
+                        <label for="title">Ticket subject</label>
+                        <div class="input-wrap">
+                            <input type="text" id="title" required
+                                placeholder="e.g. Cannot access payment page" />
+                            <span class="input-icon">✏️</span>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="category">Category</label>
+                            <select id="category" class="no-icon">
+                                <option value="General">General Inquiry</option>
+                                <option value="Billing">Billing &amp; Payment</option>
+                                <option value="Technical">Technical Bug</option>
+                                <option value="Feature">Feature Request</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="priority">Priority</label>
+                            <select id="priority" class="no-icon">
+                                <option value="low">🟢 Low</option>
+                                <option value="medium" selected>🟡 Medium</option>
+                                <option value="high">🟠 High</option>
+                                <option value="urgent">🔴 Urgent</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="submit-btn" id="submitTicketBtn">
+                        <span>🚀</span> Submit Ticket
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 2. MY TICKETS SECTION -->
+        <div id="sectionTickets" class="section hidden">
+            <div id="ticketsContainer"></div>
+        </div>
+
+        <!-- 3. AGENT WORKSPACE SECTION -->
+        <div id="sectionAgent" class="section hidden">
+            <div id="agentContainer"></div>
+        </div>
+
+        <!-- 4. HISTORY LOGS SECTION -->
+        <div id="sectionHistory" class="section hidden">
+            <div id="historyContainer"></div>
+        </div>
+
+    </main>
+
+    <!-- ── Thread / Comments Modal ── -->
+    <div id="commentsModal" class="comments-modal-overlay hidden">
+        <div class="comments-modal">
+            <div class="modal-header">
+                <div class="modal-title" id="commentsModalTitle">💬 Ticket Discussion Thread</div>
+                <button class="modal-close" onclick="closeCommentsModal()">✕</button>
+            </div>
+            <div class="comments-list" id="commentsList">
+                <div class="empty-state">
+                    <p>Loading messages…</p>
+                </div>
+            </div>
+            <form id="commentForm" class="comment-input-area">
+                <textarea id="commentMsg" class="comment-textarea" placeholder="Type your message or update here..." required></textarea>
+                <div class="comment-actions">
+                    <label id="internalCheckWrap" class="internal-checkbox-label hidden">
+                        <input type="checkbox" id="commentInternal" /> 🔒 Internal Note (Staff only)
+                    </label>
+                    <button type="submit" class="submit-btn" style="margin-top:0; padding: 8px 18px;">
+                        <span>💬</span> Send Message
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let currentUser = null;
+        let activeCommentTicketId = null;
+
+        // ── Helpers ──────────────────────────────────────────────────
+
+        function elt(tag, attrs, ...children) {
+            const el = document.createElement(tag);
+            if (attrs) {
+                for (const [k, v] of Object.entries(attrs)) {
+                    if (k === 'className') el.className = v;
+                    else if (k === 'textContent') el.textContent = v;
+                    else el.setAttribute(k, v);
+                }
+            }
+            for (const child of children) {
+                if (typeof child === 'string') el.appendChild(document.createTextNode(child));
+                else if (child) el.appendChild(child);
+            }
+            return el;
+        }
+
+        function badgeEl(status) {
+            return elt('span', { className: 'badge ' + status, textContent: status });
+        }
+
+        // ── Auth ─────────────────────────────────────────────────────
+
+        async function checkUser() {
+            const response = await fetch('/api/me');
+            if (!response.ok) {
+                window.location.href = '/login.html';
+                return;
+            }
+            const { user } = await response.json();
+            currentUser = user;
+
+            document.getElementById('userName').textContent = user.name + (user.role !== 'customer' ? ` (${user.role.toUpperCase()})` : '');
+            const initials = user.name.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+            document.getElementById('userAvatar').textContent = initials;
+
+            // Admin link
+            if (user.role === 'admin') {
+                document.getElementById('adminNavWrap').classList.remove('hidden');
+            }
+
+            // Agent Workspace Tab
+            if (user.role === 'agent' || user.role === 'admin') {
+                document.getElementById('tabAgent').classList.remove('hidden');
+                document.getElementById('internalCheckWrap').classList.remove('hidden');
+            }
+        }
+
+        // ── Tab Switching ─────────────────────────────────────────────
+
+        function switchTab(tab) {
+            ['book', 'tickets', 'agent', 'history'].forEach(t => {
+                const btn = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1));
+                const sec = document.getElementById('section' + t.charAt(0).toUpperCase() + t.slice(1));
+                if (btn) btn.classList.toggle('active', t === tab);
+                if (sec) sec.classList.toggle('hidden', t !== tab);
+            });
+            if (tab === 'tickets') loadMyTickets();
+            if (tab === 'agent') loadAgentWorkspace();
+            if (tab === 'history') loadHistory();
+        }
+
+        // ── Book Ticket ───────────────────────────────────────────────
+
+        document.getElementById('bookForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('submitTicketBtn');
+            const title = document.getElementById('title').value.trim();
+            const category = document.getElementById('category').value;
+            const priority = document.getElementById('priority').value;
+
+            if (!title) return alert('Please enter a ticket subject.');
+
+            btn.disabled = true;
+            btn.textContent = 'Submitting...';
+
+            try {
+                const res = await fetch('/api/tickets', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title, category, priority })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    document.getElementById('title').value = '';
+                    btn.textContent = '✓ Ticket Submitted!';
+                    setTimeout(() => switchTab('tickets'), 700);
+                } else {
+                    alert(data.error || 'Failed to create ticket');
+                }
+            } finally {
+                setTimeout(() => {
+                    btn.disabled = false;
+                    btn.innerHTML = '<span>🚀</span> Submit Ticket';
+                }, 1000);
+            }
+        });
+
+        // ── My Tickets ────────────────────────────────────────────────
+
+        async function loadMyTickets() {
+            const container = document.getElementById('ticketsContainer');
+            container.textContent = '';
+
+            const res = await fetch('/api/tickets/my');
+            const data = await res.json();
+
+            if (!data.tickets || data.tickets.length === 0) {
+                const wrap = elt('div', { className: 'panel' },
+                    elt('div', { className: 'empty-state' },
+                        elt('div', { className: 'empty-icon', textContent: '🎫' }),
+                        elt('p', { textContent: 'No tickets yet. Book your first one!' })
+                    )
+                );
+                container.appendChild(wrap);
+                return;
+            }
+
+            const table = elt('table');
+            const thead = elt('thead', {},
+                elt('tr', {},
+                    elt('th', { textContent: 'Ticket #' }),
+                    elt('th', { textContent: 'Subject' }),
+                    elt('th', { textContent: 'Category' }),
+                    elt('th', { textContent: 'Status' }),
+                    elt('th', { textContent: 'Assigned Agent' }),
+                    elt('th', { textContent: 'Actions' })
+                )
+            );
+            table.appendChild(thead);
+
+            const tbody = document.createElement('tbody');
+            data.tickets.forEach(ticket => {
+                const tr = elt('tr');
+
+                // Ticket #
+                const tdNum = elt('td');
+                tdNum.appendChild(elt('span', { className: 'ticket-num', textContent: ticket.ticket_number }));
+                tr.appendChild(tdNum);
+
+                // Title + optional Resolution summary
+                const tdTitle = elt('td');
+                tdTitle.appendChild(elt('div', { textContent: ticket.title, style: 'font-weight:600;' }));
+                if (ticket.resolution_summary) {
+                    const resBox = elt('div', { className: 'resolution-box' },
+                        elt('strong', { textContent: '✅ Resolution Summary:' }),
+                        elt('span', { textContent: ticket.resolution_summary })
+                    );
+                    tdTitle.appendChild(resBox);
+                }
+                tr.appendChild(tdTitle);
+
+                tr.appendChild(elt('td', { textContent: ticket.category }));
+
+                // Status badge
+                const tdStatus = elt('td');
+                tdStatus.appendChild(badgeEl(ticket.status));
+                tr.appendChild(tdStatus);
+
+                // Assigned Agent
+                const tdAgent = elt('td');
+                if (ticket.assigned_agent_name) {
+                    tdAgent.appendChild(elt('span', { style: 'color: #60a5fa; font-weight: 500;', textContent: '👤 ' + ticket.assigned_agent_name }));
+                } else {
+                    tdAgent.appendChild(elt('span', { style: 'color: #f59e0b; font-style: italic;', textContent: '⚠️ Pending Assignment' }));
+                }
+                tr.appendChild(tdAgent);
+
+                // Actions
+                const tdAction = elt('td');
+                const btnComments = elt('button', { className: 'comment-btn' }, '💬 Discussion');
+                btnComments.addEventListener('click', () => openCommentsModal(ticket.id, ticket.ticket_number));
+                tdAction.appendChild(btnComments);
+
+                if (ticket.status === 'OPEN') {
+                    const btnCancel = elt('button', { className: 'cancel-btn', style: 'margin-left: 6px;' }, '✕ Cancel');
+                    btnCancel.addEventListener('click', () => cancelTicket(ticket.id));
+                    tdAction.appendChild(btnCancel);
+                }
+                tr.appendChild(tdAction);
+
+                tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+
+            const panel = elt('div', { className: 'panel' },
+                elt('div', { className: 'table-wrap' }, table)
+            );
+            container.appendChild(panel);
+        }
+
+        async function cancelTicket(id) {
+            if (!confirm('Cancel this ticket? This cannot be undone.')) return;
+            const res = await fetch(`/api/tickets/${id}/cancel`, { method: 'POST' });
+            const data = await res.json();
+            if (res.ok) {
+                loadMyTickets();
+            } else {
+                alert(data.error || 'Failed to cancel ticket');
+            }
+        }
+
+        // ── Support Agent Workspace ────────────────────────────────────
+
+        async function loadAgentWorkspace() {
+            const container = document.getElementById('agentContainer');
+            container.textContent = '';
+
+            const res = await fetch('/api/agent/tickets');
+            if (!res.ok) {
+                container.appendChild(elt('div', { className: 'panel' },
+                    elt('div', { className: 'empty-state' },
+                        elt('div', { className: 'empty-icon', textContent: '❌' }),
+                        elt('p', { textContent: 'Failed to load assigned tickets.' })
+                    )
+                ));
+                return;
+            }
+
+            const data = await res.json();
+            if (!data.tickets || data.tickets.length === 0) {
+                container.appendChild(elt('div', { className: 'panel' },
+                    elt('div', { className: 'empty-state' },
+                        elt('div', { className: 'empty-icon', textContent: '🛠️' }),
+                        elt('p', { textContent: 'No tasks assigned to you currently.' })
+                    )
+                ));
+                return;
+            }
+
+            const table = elt('table');
+            const thead = elt('thead', {},
+                elt('tr', {},
+                    elt('th', { textContent: 'Ticket #' }),
+                    elt('th', { textContent: 'Customer' }),
+                    elt('th', { textContent: 'Subject' }),
+                    elt('th', { textContent: 'Category' }),
+                    elt('th', { textContent: 'Status' }),
+                    elt('th', { textContent: 'Actions' })
+                )
+            );
+            table.appendChild(thead);
+
+            const tbody = document.createElement('tbody');
+            data.tickets.forEach(ticket => {
+                const tr = elt('tr');
+
+                // Ticket #
+                const tdNum = elt('td');
+                tdNum.appendChild(elt('span', { className: 'ticket-num', textContent: ticket.ticket_number }));
+                tr.appendChild(tdNum);
+
+                // Customer
+                tr.appendChild(elt('td', { textContent: `${ticket.user_name} (${ticket.user_email})` }));
+
+                // Title + resolution summary if resolved
+                const tdTitle = elt('td');
+                tdTitle.appendChild(elt('div', { textContent: ticket.title, style: 'font-weight:600;' }));
+                if (ticket.resolution_summary) {
+                    tdTitle.appendChild(elt('div', { className: 'resolution-box' },
+                        elt('strong', { textContent: 'Resolution Provided:' }),
+                        elt('span', { textContent: ticket.resolution_summary })
+                    ));
+                }
+                tr.appendChild(tdTitle);
+
+                tr.appendChild(elt('td', { textContent: ticket.category }));
+
+                // Status badge
+                const tdStatus = elt('td');
+                tdStatus.appendChild(badgeEl(ticket.status));
+                tr.appendChild(tdStatus);
+
+                // Actions: Thread + Resolve Task
+                const tdAction = elt('td');
+                const btnComments = elt('button', { className: 'comment-btn' }, '💬 Thread');
+                btnComments.addEventListener('click', () => openCommentsModal(ticket.id, ticket.ticket_number));
+                tdAction.appendChild(btnComments);
+
+                if (ticket.status !== 'RESOLVED' && ticket.status !== 'CANCELLED') {
+                    const btnResolve = elt('button', { className: 'resolve-btn', style: 'margin-left:6px;' }, '✅ Resolve');
+                    btnResolve.addEventListener('click', () => resolveTaskPrompt(ticket.id, ticket.ticket_number));
+                    tdAction.appendChild(btnResolve);
+                }
+
+                tr.appendChild(tdAction);
+                tbody.appendChild(tr);
+            });
+
+            table.appendChild(tbody);
+            container.appendChild(elt('div', { className: 'panel' },
+                elt('div', { className: 'table-wrap' }, table)
+            ));
+        }
+
+        async function resolveTaskPrompt(ticketId, ticketNumber) {
+            const summary = prompt(`Marking Ticket ${ticketNumber} as RESOLVED.\nPlease provide a brief Resolution Summary:`);
+            if (!summary || summary.trim().length < 5) {
+                return alert('Resolution summary must be at least 5 characters.');
+            }
+
+            const res = await fetch(`/api/agent/tickets/${ticketId}/resolve`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ resolutionSummary: summary.trim() })
+            });
+
+            const data = await res.json();
+            if (res.ok) {
+                alert(`Ticket ${ticketNumber} resolved successfully!`);
+                loadAgentWorkspace();
+            } else {
+                alert(data.error || 'Failed to resolve ticket');
+            }
+        }
+
+        // ── Discussion Thread & Comments Modal ─────────────────────────
+
+        async function openCommentsModal(ticketId, ticketNumber) {
+            activeCommentTicketId = ticketId;
+            document.getElementById('commentsModalTitle').textContent = `💬 Discussion Thread — Ticket ${ticketNumber}`;
+            document.getElementById('commentsModal').classList.remove('hidden');
+            await loadComments(ticketId);
+        }
+
+        function closeCommentsModal() {
+            document.getElementById('commentsModal').classList.add('hidden');
+            activeCommentTicketId = null;
+        }
+
+        async function loadComments(ticketId) {
+            const list = document.getElementById('commentsList');
+            list.textContent = '';
+
+            const res = await fetch(`/api/tickets/${ticketId}/comments`);
+            if (!res.ok) {
+                list.appendChild(elt('div', { className: 'empty-state' }, elt('p', { textContent: 'Failed to load comments.' })));
+                return;
+            }
+
+            const { comments } = await res.json();
+            if (!comments || comments.length === 0) {
+                list.appendChild(elt('div', { className: 'empty-state' }, elt('p', { textContent: 'No messages in this thread yet. Be the first to reply!' })));
+                return;
+            }
+
+            comments.forEach(c => {
+                const dt = new Date(c.created_at);
+                const isInternal = c.is_internal;
+
+                const item = elt('div', { className: 'comment-item' + (isInternal ? ' internal' : '') },
+                    elt('div', { className: 'comment-meta' },
+                        elt('span', { className: 'comment-user', textContent: `${c.user_name} (${c.user_role.toUpperCase()}) ${isInternal ? '🔒 INTERNAL NOTE' : ''}` }),
+                        elt('span', { textContent: dt.toLocaleString() })
+                    ),
+                    elt('div', { className: 'comment-msg', textContent: c.message })
+                );
+                list.appendChild(item);
+            });
+
+            // Scroll to bottom
+            list.scrollTop = list.scrollHeight;
+        }
+
+        document.getElementById('commentForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!activeCommentTicketId) return;
+
+            const msgInput = document.getElementById('commentMsg');
+            const isInternalInput = document.getElementById('commentInternal');
+            const message = msgInput.value.trim();
+            const isInternal = isInternalInput ? isInternalInput.checked : false;
+
+            if (!message) return;
+
+            const res = await fetch(`/api/tickets/${activeCommentTicketId}/comments`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message, isInternal })
+            });
+
+            if (res.ok) {
+                msgInput.value = '';
+                if (isInternalInput) isInternalInput.checked = false;
+                loadComments(activeCommentTicketId);
+            } else {
+                const data = await res.json();
+                alert(data.error || 'Failed to post comment');
+            }
+        });
+
+        // ── History Logs ──────────────────────────────────────────────
+
+        async function loadHistory() {
+            const container = document.getElementById('historyContainer');
+            container.textContent = '';
+
+            const res = await fetch('/api/history');
+            const data = await res.json();
+
+            if (!data.logs || data.logs.length === 0) {
+                const wrap = elt('div', { className: 'panel' },
+                    elt('div', { className: 'empty-state' },
+                        elt('div', { className: 'empty-icon', textContent: '📜' }),
+                        elt('p', { textContent: 'No activity recorded yet.' })
+                    )
+                );
+                container.appendChild(wrap);
+                return;
+            }
+
+            const table = elt('table');
+            const thead = elt('thead', {},
+                elt('tr', {},
+                    elt('th', { textContent: 'Date & Time' }),
+                    elt('th', { textContent: 'Action' }),
+                    elt('th', { textContent: 'Details' })
+                )
+            );
+            table.appendChild(thead);
+
+            const tbody = document.createElement('tbody');
+            data.logs.forEach(log => {
+                const tr = elt('tr');
+
+                const dt = new Date(log.created_at);
+                const tdTime = elt('td');
+                tdTime.appendChild(elt('div', { className: 'log-time', textContent: dt.toLocaleDateString() }));
+                tdTime.appendChild(elt('div', { className: 'log-time', textContent: dt.toLocaleTimeString() }));
+                tr.appendChild(tdTime);
+
+                const tdAction = elt('td');
+                tdAction.appendChild(elt('span', { className: 'log-action', textContent: log.action }));
+                tr.appendChild(tdAction);
+
+                tr.appendChild(elt('td', { className: 'log-details', textContent: log.details }));
+
+                tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+
+            const panel = elt('div', { className: 'panel' },
+                elt('div', { className: 'table-wrap' }, table)
+            );
+            container.appendChild(panel);
+        }
+
+        // ── Logout ────────────────────────────────────────────────────
+
+        async function logout() {
+            await fetch('/api/logout', { method: 'POST' });
+            window.location.href = '/login.html';
+        }
+
+        // ── Init ──────────────────────────────────────────────────────
+        checkUser();
+    </script>
+</body>
+</html>
+

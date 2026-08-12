@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel — TicketFlow</title>
+    <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+
+    <!-- ── Top Navigation ── -->
+    <nav class="topnav">
+        <div class="nav-brand">
+            <div class="nav-brand-icon">🛡️</div>
+            <span class="nav-brand-name">TicketFlow</span>
+            <span class="admin-badge">Admin</span>
+        </div>
+        <div class="nav-right">
+            <div class="user-badge">
+                <div class="user-avatar" id="adminAvatar">A</div>
+                <span class="user-name" id="adminName">Admin</span>
+            </div>
+            <button class="logout-btn" onclick="logout()">
+                <span>⏻</span> Logout
+            </button>
+        </div>
+    </nav>
+
+    <!-- ── Main Content ── -->
+    <main class="main-content">
+
+        <!-- Page Header -->
+        <div class="page-header">
+            <h1 class="page-title">🛡️ Control Panel</h1>
+            <p class="page-subtitle">Monitor and manage all support tickets across the platform.</p>
+        </div>
+
+        <!-- Stats Grid -->
+        <div class="stats-grid">
+            <div class="stat-card total">
+                <span class="stat-icon">📊</span>
+                <div class="stat-title">Total Tickets</div>
+                <div class="stat-value" id="statTotal">—</div>
+            </div>
+            <div class="stat-card yellow">
+                <span class="stat-icon">🔓</span>
+                <div class="stat-title">Open</div>
+                <div class="stat-value" id="statOpen">—</div>
+            </div>
+            <div class="stat-card blue">
+                <span class="stat-icon">⚙️</span>
+                <div class="stat-title">In Progress</div>
+                <div class="stat-value" id="statInProgress">—</div>
+            </div>
+            <div class="stat-card green">
+                <span class="stat-icon">✅</span>
+                <div class="stat-title">Resolved</div>
+                <div class="stat-value" id="statResolved">—</div>
+            </div>
+            <div class="stat-card red">
+                <span class="stat-icon">✕</span>
+                <div class="stat-title">Cancelled</div>
+                <div class="stat-value" id="statCancelled">—</div>
+            </div>
+        </div>
+
+        <!-- Section Navigation Tabs -->
+        <div class="nav-tabs">
+            <button class="tab-btn active" id="tabTickets" onclick="switchTab('tickets')">
+                🎫 All Support Tickets
+            </button>
+            <button class="tab-btn" id="tabUsers" onclick="switchTab('users')">
+                👥 Manage Support Agents & Roles
+            </button>
+        </div>
+
+        <!-- Tickets Panel -->
+        <div class="panel" id="panelTickets">
+            <div class="panel-header">
+                <h2 class="panel-title">
+                    🎫 All Support Tickets
+                    <span class="panel-count" id="ticketCount">…</span>
+                </h2>
+                <button class="refresh-btn" onclick="refreshAll()">
+                    <span>↺</span> Refresh
+                </button>
+            </div>
+            <div class="table-scroll">
+                <div id="ticketsList">
+                    <div class="empty-state">
+                        <div class="empty-icon">⏳</div>
+                        <p>Loading tickets…</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Users & Staff Panel -->
+        <div class="panel hidden" id="panelUsers">
+            <div class="panel-header">
+                <h2 class="panel-title">
+                    👥 User & Agent Role Management
+                    <span class="panel-count" id="userCount">…</span>
+                </h2>
+                <button class="refresh-btn" onclick="loadUsers()">
+                    <span>↺</span> Refresh Users
+                </button>
+            </div>
+            <div class="table-scroll">
+                <div id="usersList">
+                    <div class="empty-state">
+                        <div class="empty-icon">⏳</div>
+                        <p>Loading users…</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        let cachedAgents = [];
+
+        // ── Helpers ──────────────────────────────────────────────────
+
+        function elt(tag, attrs, ...children) {
+            const el = document.createElement(tag);
+            if (attrs) {
+                for (const [k, v] of Object.entries(attrs)) {
+                    if (k === 'className') el.className = v;
+                    else if (k === 'textContent') el.textContent = v;
+                    else el.setAttribute(k, v);
+                }
+            }
+            for (const child of children) {
+                if (typeof child === 'string') el.appendChild(document.createTextNode(child));
+                else if (child) el.appendChild(child);
+            }
+            return el;
+        }
+
+        // ── Auth Check ────────────────────────────────────────────────
+
+        async function checkAdmin() {
+            const res = await fetch('/api/me');
+            if (!res.ok) {
+                window.location.href = '/login.html';
+                return;
+            }
+            const { user } = await res.json();
+            if (user.role !== 'admin') {
+                alert('Access Denied: Admin privileges required.');
+                window.location.href = '/dashboard.html';
+                return;
+            }
+            document.getElementById('adminName').textContent = user.name;
+            const initials = user.name.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+            document.getElementById('adminAvatar').textContent = initials;
+            loadStats();
+            loadAllTickets();
+        }
+
+        // ── Stats ─────────────────────────────────────────────────────
+
+        async function loadStats() {
+            const res = await fetch('/api/admin/stats');
+            if (!res.ok) return;
+            const { stats } = await res.json();
+            document.getElementById('statTotal').textContent = stats.total;
+            document.getElementById('statOpen').textContent = stats.open;
+            document.getElementById('statInProgress').textContent = stats.inProgress;
+            document.getElementById('statResolved').textContent = stats.resolved;
+            document.getElementById('statCancelled').textContent = stats.cancelled;
+        }
+
+        // ── Agents List ───────────────────────────────────────────────
+
+        async function loadAgents() {
+            const res = await fetch('/api/admin/agents');
+            if (res.ok) {
+                const data = await res.json();
+                cachedAgents = data.agents || [];
+            }
+        }
+
+        // ── All Tickets ───────────────────────────────────────────────
+
+        async function loadAllTickets() {
+            const container = document.getElementById('ticketsList');
+            container.textContent = '';
+
+            await loadAgents();
+
+            const res = await fetch('/api/admin/tickets');
+            if (!res.ok) {
+                container.appendChild(elt('div', { className: 'empty-state' },
+                    elt('div', { className: 'empty-icon', textContent: '❌' }),
+                    elt('p', { className: 'error', textContent: 'Failed to load tickets.' })
+                ));
+                return;
+            }
+
+            const { tickets } = await res.json();
+            document.getElementById('ticketCount').textContent = tickets.length;
+
+            if (!tickets || tickets.length === 0) {
+                container.appendChild(elt('div', { className: 'empty-state' },
+                    elt('div', { className: 'empty-icon', textContent: '🎫' }),
+                    elt('p', { textContent: 'No tickets in the system yet.' })
+                ));
+                return;
+            }
+
+            const table = elt('table');
+
+            // Table header
+            const thead = elt('thead', {},
+                elt('tr', {},
+                    elt('th', { textContent: 'Ticket #' }),
+                    elt('th', { textContent: 'Customer' }),
+                    elt('th', { textContent: 'Subject' }),
+                    elt('th', { textContent: 'Category' }),
+                    elt('th', { textContent: 'Status' }),
+                    elt('th', { textContent: 'Assign Support Agent' }),
+                    elt('th', { textContent: 'Update Status' })
+                )
+            );
+            table.appendChild(thead);
+
+            // Table body
+            const tbody = document.createElement('tbody');
+            tickets.forEach(ticket => {
+                const tr = elt('tr');
+
+                // Ticket #
+                const tdNum = elt('td');
+                tdNum.appendChild(elt('span', { className: 'ticket-num', textContent: ticket.ticket_number }));
+                tr.appendChild(tdNum);
+
+                // User (avatar + name + email)
+                const tdUser = elt('td');
+                const initials = ticket.user_name.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+                tdUser.appendChild(
+                    elt('div', { className: 'user-cell' },
+                        elt('div', { className: 'user-mini-avatar', textContent: initials }),
+                        elt('div', {},
+                            elt('div', { className: 'user-cell-name', textContent: ticket.user_name }),
+                            elt('div', { className: 'user-cell-email', textContent: ticket.user_email })
+                        )
+                    )
+                );
+                tr.appendChild(tdUser);
+
+                // Title
+                tr.appendChild(elt('td', { textContent: ticket.title }));
+
+                // Category
+                tr.appendChild(elt('td', { textContent: ticket.category }));
+
+                // Status badge
+                const tdStatus = elt('td');
+                tdStatus.appendChild(elt('span', { className: 'badge ' + ticket.status, textContent: ticket.status }));
+                tr.appendChild(tdStatus);
+
+                // Assign Agent dropdown
+                const tdAgent = elt('td');
+                const agentSelect = elt('select', { className: 'agent-select' + (ticket.assigned_to ? ' assigned' : '') });
+                
+                const unassignedOpt = elt('option', { value: '', textContent: '⚠️ Unassigned' });
+                agentSelect.appendChild(unassignedOpt);
+
+                cachedAgents.forEach(agent => {
+                    const opt = elt('option', { value: agent.id, textContent: `👤 ${agent.name} (${agent.role})` });
+                    if (ticket.assigned_to === agent.id) opt.selected = true;
+                    agentSelect.appendChild(opt);
+                });
+
+                agentSelect.addEventListener('change', async () => {
+                    await assignAgent(ticket.id, agentSelect.value);
+                });
+
+                tdAgent.appendChild(agentSelect);
+                tr.appendChild(tdAgent);
+
+                // Status dropdown
+                const tdUpdate = elt('td');
+                const select = elt('select', { className: 'status-select' });
+
+                const defaultOpt = elt('option', { value: '', textContent: 'Change status…' });
+                select.appendChild(defaultOpt);
+
+                ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CANCELLED'].forEach(status => {
+                    const opt = elt('option', { value: status, textContent: status });
+                    if (ticket.status === status) opt.selected = true;
+                    select.appendChild(opt);
+                });
+
+                select.addEventListener('change', async () => {
+                    if (!select.value) return;
+                    await updateStatus(ticket.id, select.value);
+                });
+
+                tdUpdate.appendChild(select);
+                tr.appendChild(tdUpdate);
+
+                tbody.appendChild(tr);
+            });
+
+            table.appendChild(tbody);
+            container.appendChild(table);
+        }
+
+        // ── Assign Agent ──────────────────────────────────────────────
+
+        async function assignAgent(ticketId, agentId) {
+            const res = await fetch(`/api/admin/tickets/${ticketId}/assign`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ agentId: agentId ? parseInt(agentId, 10) : null })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                loadStats();
+                loadAllTickets();
+            } else {
+                alert(data.error || 'Failed to assign agent');
+            }
+        }
+
+        // ── Update Status ─────────────────────────────────────────────
+
+        async function updateStatus(ticketId, newStatus) {
+            const res = await fetch(`/api/admin/tickets/${ticketId}/status`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: newStatus })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                loadStats();
+                loadAllTickets();
+            } else {
+                alert(data.error || 'Failed to update status');
+            }
+        }
+
+        // ── User Management ───────────────────────────────────────────
+
+        async function loadUsers() {
+            const container = document.getElementById('usersList');
+            container.textContent = '';
+
+            const res = await fetch('/api/admin/users');
+            if (!res.ok) {
+                container.appendChild(elt('div', { className: 'empty-state' },
+                    elt('div', { className: 'empty-icon', textContent: '❌' }),
+                    elt('p', { className: 'error', textContent: 'Failed to load users.' })
+                ));
+                return;
+            }
+
+            const { users } = await res.json();
+            document.getElementById('userCount').textContent = users.length;
+
+            const table = elt('table');
+            const thead = elt('thead', {},
+                elt('tr', {},
+                    elt('th', { textContent: 'User' }),
+                    elt('th', { textContent: 'Email' }),
+                    elt('th', { textContent: 'Current Role' }),
+                    elt('th', { textContent: 'Department' }),
+                    elt('th', { textContent: 'Change Role' })
+                )
+            );
+            table.appendChild(thead);
+
+            const tbody = document.createElement('tbody');
+            users.forEach(u => {
+                const tr = elt('tr');
+                tr.appendChild(elt('td', { textContent: u.name }));
+                tr.appendChild(elt('td', { textContent: u.email }));
+                tr.appendChild(elt('td', {}, elt('span', { className: 'badge ' + (u.role === 'admin' ? 'RESOLVED' : u.role === 'agent' ? 'IN_PROGRESS' : 'OPEN'), textContent: u.role })));
+                tr.appendChild(elt('td', { textContent: u.department || 'General' }));
+
+                const tdRole = elt('td');
+                const selectRole = elt('select', { className: 'role-select' });
+                ['customer', 'agent', 'admin'].forEach(r => {
+                    const opt = elt('option', { value: r, textContent: r.toUpperCase() });
+                    if (u.role === r) opt.selected = true;
+                    selectRole.appendChild(opt);
+                });
+
+                selectRole.addEventListener('change', async () => {
+                    await updateUserRole(u.id, selectRole.value, u.department);
+                });
+                tdRole.appendChild(selectRole);
+                tr.appendChild(tdRole);
+
+                tbody.appendChild(tr);
+            });
+
+            table.appendChild(tbody);
+            container.appendChild(table);
+        }
+
+        async function updateUserRole(userId, newRole, department) {
+            const res = await fetch(`/api/admin/users/${userId}/role`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ role: newRole, department: department || 'General' })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                loadUsers();
+                loadAgents();
+            } else {
+                alert(data.error || 'Failed to update role');
+            }
+        }
+
+        function switchTab(tab) {
+            document.getElementById('tabTickets').classList.toggle('active', tab === 'tickets');
+            document.getElementById('tabUsers').classList.toggle('active', tab === 'users');
+            document.getElementById('panelTickets').classList.toggle('hidden', tab !== 'tickets');
+            document.getElementById('panelUsers').classList.toggle('hidden', tab !== 'users');
+            if (tab === 'users') loadUsers();
+        }
+
+        // ── Refresh ───────────────────────────────────────────────────
+
+        function refreshAll() {
+            loadStats();
+            loadAllTickets();
+        }
+
+        // ── Logout ────────────────────────────────────────────────────
+
+        async function logout() {
+            await fetch('/api/logout', { method: 'POST' });
+            window.location.href = '/login.html';
+        }
+
+        // ── Init ──────────────────────────────────────────────────────
+        checkAdmin();
+    </script>
+</body>
+</html>
+

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign In — TicketFlow</title>
+    <link rel="stylesheet" href="login.css">
+</head>
+<body>
+    <div class="login-card">
+        <!-- Brand -->
+        <div class="brand">
+            <div class="brand-icon">🎟️</div>
+            <span class="brand-text">TicketFlow</span>
+        </div>
+
+        <h1 class="card-title">Welcome back</h1>
+        <p class="card-subtitle">Sign in to manage your support tickets</p>
+
+        <!-- Alert Box -->
+        <div id="alertBox" class="alert hidden">
+            <span>⚠️</span>
+            <span id="alertMsg"></span>
+        </div>
+
+        <form id="loginForm" autocomplete="on" novalidate>
+            <div class="form-group">
+                <label for="email">Email address</label>
+                <div class="input-wrap">
+                    <input type="email" id="email" name="email"
+                        required autocomplete="email"
+                        placeholder="you@example.com" />
+                    <span class="input-icon">✉️</span>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="password">Password</label>
+                <div class="input-wrap">
+                    <input type="password" id="password" name="password"
+                        required autocomplete="current-password"
+                        placeholder="••••••••" />
+                    <span class="input-icon">🔒</span>
+                </div>
+            </div>
+
+            <button type="submit" class="btn-primary" id="submitBtn">
+                Sign In
+            </button>
+        </form>
+
+        <div class="card-footer">
+            <a href="/register.html" class="link">
+                Don't have an account? <span>Create one →</span>
+            </a>
+        </div>
+    </div>
+
+    <script>
+        const alertBox = document.getElementById('alertBox');
+        const alertMsg = document.getElementById('alertMsg');
+        const submitBtn = document.getElementById('submitBtn');
+
+        // Show URL error param safely (no innerHTML)
+        const urlParams = new URLSearchParams(window.location.search);
+        const errorParam = urlParams.get('error');
+        if (errorParam) {
+            alertMsg.textContent = errorParam;
+            alertBox.classList.remove('hidden');
+        }
+
+        function showError(msg) {
+            alertMsg.textContent = msg;
+            alertBox.classList.remove('hidden');
+        }
+
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            alertBox.classList.add('hidden');
+
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value;
+
+            // Client-side validation
+            if (!email || !password) {
+                return showError('Please fill in all fields.');
+            }
+
+            // Loading state
+            submitBtn.classList.add('loading');
+            submitBtn.textContent = '';
+
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    submitBtn.textContent = '✓ Redirecting...';
+                    if (data.role === 'admin') {
+                        window.location.href = '/admin.html';
+                    } else {
+                        window.location.href = '/dashboard.html';
+                    }
+                } else {
+                    showError(data.error || 'Login failed. Please try again.');
+                }
+            } catch (err) {
+                showError('Network error. Please check your connection.');
+            } finally {
+                submitBtn.classList.remove('loading');
+                if (submitBtn.textContent === '') submitBtn.textContent = 'Sign In';
+            }
+        });
+    </script>
+</body>
+</html>
